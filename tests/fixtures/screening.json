@@ -1,0 +1,18 @@
+{
+  "CinemaID": 1016,
+  "CinemaNameKR": "월드타워",
+  "MovieNameKR": "최종면접",
+  "MovieCode": "25051",
+  "RepresentationMovieCode": "24998",
+  "ScreenID": 101604,
+  "ScreenNameKR": "4관",
+  "PlayDt": "2026-10-31",
+  "PlaySequence": 0,
+  "StartTime": "13:15",
+  "EndTime": "15:13",
+  "AccompanyTypeCode": 30,
+  "AccompanyTypeNameKR": "무대인사",
+  "IsBookingYN": "Y",
+  "BookingSeatCount": 87,
+  "TotalSeatCount": 268
+}

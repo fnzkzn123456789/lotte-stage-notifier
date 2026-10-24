@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+data/
+research/
+lotte-ticketing.html
+build/
+dist/
+*.spec
+tests/.tmp/
+release/
+.env
+.env.*
+!.env.example
+notifier-state.json
+
