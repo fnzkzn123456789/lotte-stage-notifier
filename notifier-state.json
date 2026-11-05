@@ -1,10 +1,10 @@
 {
   "cursor": {
     "anchor": "2026-11-05",
-    "index": 913
+    "index": 1093
   },
   "initialized": true,
-  "last_success": "2026-11-05T13:43:13+09:00",
+  "last_success": "2026-11-05T14:45:03+09:00",
   "scopes": {
     "1001:2026-11-03": true,
     "1001:2026-11-04": true,
@@ -1867,6 +1867,10 @@
       "day": "2026-11-15",
       "status": "sent"
     },
+    "30020ec101ca0d71cc7411f3e8e54068ebce680ab24379bdb36cbd61878f16f8": {
+      "day": "2026-11-18",
+      "status": "seen"
+    },
     "3606215cfdb0e8d7c51aa86771cf9ebddd76c93c7f91303ce08e36f5a97103b7": {
       "day": "2026-11-15",
       "status": "sent"
@@ -1907,9 +1911,25 @@
       "day": "2026-11-08",
       "status": "sent"
     },
+    "5a7e8d2b5c6c15ed82a935b81a69f8cc10bfc97249ed54c0f2e492ec6869978c": {
+      "day": "2026-11-18",
+      "status": "seen"
+    },
     "5ba528b2bc2165d0b94179b3705594f131871188829f818277ccd37dbd4ef484": {
       "day": "2026-11-04",
       "status": "baseline"
+    },
+    "667d1770b02ad31db988b109c91a570e9f3a9636bfb5e8b5014f4a7a26caf2d0": {
+      "day": "2026-11-18",
+      "status": "seen"
+    },
+    "67e05036b4e807954003d18cfbd0ddb7366185c2d91d8466b9b09badb1b5bb80": {
+      "day": "2026-11-18",
+      "status": "seen"
+    },
+    "6837941d5c597f7da6c5b740da8823ef6ff5d41bfd9e59de3211891c7e68fa01": {
+      "day": "2026-11-18",
+      "status": "seen"
     },
     "6ea6082308506c3cd4fd7aca1ee65e7f3d48d85a0c45ac7379b64d613adf1c72": {
       "day": "2026-11-07",
@@ -1986,6 +2006,10 @@
     "bd910a96a5c33979d48b9176cf10ea89ae927d00542393fb9a277656ed67088b": {
       "day": "2026-11-15",
       "status": "sent"
+    },
+    "c0a3bd1c341d13c663a80d58005a1653744e131051b2b0851af560662fdad829": {
+      "day": "2026-11-18",
+      "status": "seen"
     },
     "c77b4920cc2f44fbac36691e1200cbe2ed5713f061d10f9400058644cd7386f7": {
       "day": "2026-11-14",
