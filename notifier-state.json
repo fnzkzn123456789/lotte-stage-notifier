@@ -1898,6 +1898,14 @@
     "9132:2026-12-03": true
   },
   "shows": {
+    "063d7a093885ebae51601669d8f009e81ace7315c04a00f2a3e789d0e23a4d1f": {
+      "day": "2026-11-12",
+      "status": "seen"
+    },
+    "064bc5f1a1750d92a8f9dcc05fa436065e4c86683afd27f91b407dfa12d78659": {
+      "day": "2026-11-12",
+      "status": "seen"
+    },
     "0a82ead9e0fbca2c1e88be022b2e402d003d9ace5cac50259c7a67fa2f7d4b94": {
       "day": "2026-11-08",
       "status": "sent"
@@ -1941,6 +1949,10 @@
     "367686cfc7a8d984853aa4fa8c534739e94f0f01167107536bc28fb9d00cb8c9": {
       "day": "2026-11-08",
       "status": "baseline"
+    },
+    "375230ad579455631f656a5337f6840ae22c1d79a8dfd06deaa74cb2f02151d1": {
+      "day": "2026-11-12",
+      "status": "seen"
     },
     "3a2b818b77c32abf4d29812992632244b9a4b20da046935cd7cb9ff43f32ea17": {
       "day": "2026-11-08",
