@@ -1978,9 +1978,17 @@
       "day": "2026-11-14",
       "status": "sent"
     },
+    "884832b182c021f0399c49819f01053c099619fd5a5ec4f01e35b90afb4ec374": {
+      "day": "2026-11-22",
+      "status": "seen"
+    },
     "892b175b5129a6b8e993c406c972a7155ad41d6aff3833ceeaa629a773b4155c": {
       "day": "2026-11-13",
       "status": "sent"
+    },
+    "915f9f5de336b50989ef5e0e691e2dcbb153a822aec99805bb0c124ef91ca7a6": {
+      "day": "2026-11-22",
+      "status": "seen"
     },
     "980bd3a8d51219a173eb28bd7f775cc2baa38113e5091d044627e51fa1a7057d": {
       "day": "2026-11-14",
@@ -2013,6 +2021,10 @@
     "ba699a597b89793b3cc55418f37a8465d7a594bbb5f923282b76a99bf848f929": {
       "day": "2026-11-28",
       "status": "sent"
+    },
+    "baad524461263e3c804fe049be1290cc98d468f3a1afe1ad25b27965e612ead1": {
+      "day": "2026-11-22",
+      "status": "seen"
     },
     "bc06740160abdf12c6fc30700144c5aed449ec297efa0a3ecbca005c1067fd76": {
       "day": "2026-11-14",
