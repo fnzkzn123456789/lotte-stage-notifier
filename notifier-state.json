@@ -1,10 +1,10 @@
 {
   "cursor": {
     "anchor": "2026-11-18",
-    "index": 1567
+    "index": 1597
   },
   "initialized": true,
-  "last_success": "2026-11-18T08:24:06+09:00",
+  "last_success": "2026-11-18T08:26:07+09:00",
   "scopes": {
     "1001:2026-11-16": true,
     "1001:2026-11-17": true,
@@ -1957,6 +1957,10 @@
     "884832b182c021f0399c49819f01053c099619fd5a5ec4f01e35b90afb4ec374": {
       "day": "2026-11-22",
       "status": "sent"
+    },
+    "8e796b514bb0e6b8d0ba33d2c0d6ecb2e6e7ef2c5c8b9f4433f548a781ff55a3": {
+      "day": "2026-11-30",
+      "status": "seen"
     },
     "915f9f5de336b50989ef5e0e691e2dcbb153a822aec99805bb0c124ef91ca7a6": {
       "day": "2026-11-22",
