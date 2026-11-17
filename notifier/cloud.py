@@ -15,7 +15,8 @@ import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
 
-from .core import LotteClient, ServiceError, Telegram, is_stage, message_for, now_kst, parse_screenings
+from .core import (LotteClient, ServiceError, Telegram, is_stage, message_for, now_kst,
+                   parse_screenings, prep_groups, prep_message_for)
 
 
 def fresh_state():
@@ -43,7 +44,8 @@ def validate_state(data):
         for key, row in data["shows"].items():
             assert re.fullmatch(r"[0-9a-f]{64}", key)
             assert set(row) == {"day", "status"} and valid_day(row["day"])
-            assert row["status"] in {"seen", "baseline", "sent"}
+            # prep: 상영준비중 알림만 보낸 상태. 예매가 열리면 sent로 바뀐다.
+            assert row["status"] in {"seen", "baseline", "sent", "prep"}
         cursor = data["cursor"]
         assert set(cursor) == {"anchor", "index"}
         assert cursor["anchor"] == "" or valid_day(cursor["anchor"])
@@ -165,13 +167,22 @@ class CloudState:
             if prior is None:
                 status = "baseline" if initial and show.bookable and not notify_existing else "seen"
                 prior = self.data["shows"][key] = {"day": show.day, "status": status}
-            if show.bookable and prior["status"] == "seen":
+            if show.bookable and prior["status"] in ("seen", "prep"):
                 pending.append(show)
         self.data["scopes"][scope] = True
         return pending
 
     def delivered(self, show):
         self.data["shows"][hashlib.sha256(show.key.encode()).hexdigest()]["status"] = "sent"
+
+    def preparing(self, shows):
+        """상영준비중인데 아직 어떤 알림도 보내지 않은 회차. observe() 뒤에 부른다."""
+        return [show for show in shows if show.preparing and self.data["shows"].get(
+            hashlib.sha256(show.key.encode()).hexdigest(), {}).get("status") == "seen"]
+
+    def prepared(self, shows):
+        for show in shows:
+            self.data["shows"][hashlib.sha256(show.key.encode()).hexdigest()]["status"] = "prep"
 
     def prune(self):
         cutoff = (now_kst().date() - timedelta(days=2)).isoformat()
@@ -217,7 +228,8 @@ def run_once(client, backend, telegram=None, *, dry_run=False, sweep_count=180, 
              deadline=None, send_delay=1.1):
     state = CloudState(fresh_state() if dry_run else backend.load())
     errors, checked = [], set()
-    counts = {"cinemas": 0, "events": 0, "schedules": 0, "stage_shows": 0, "sent": 0, "deferred": False}
+    counts = {"cinemas": 0, "events": 0, "schedules": 0, "stage_shows": 0, "sent": 0, "prep": 0,
+              "deferred": False}
 
     def checkpoint():
         if not dry_run:
@@ -252,6 +264,17 @@ def run_once(client, backend, telegram=None, *, dry_run=False, sweep_count=180, 
             # 저장 실패 시 즉시 종료해 추가 전송으로 중복 가능성을 키우지 않는다.
             checkpoint()
             counts["sent"] += 1
+            if send_delay:
+                time.sleep(send_delay)
+        # 예매 가능 알림을 먼저 보낸 뒤, 상영준비중 회차를 극장·날짜·영화별로 묶어 알린다.
+        for group in prep_groups(state.preparing(shows)):
+            if deadline is not None and time.monotonic() >= deadline:
+                raise DeadlineReached()
+            checkpoint()
+            telegram.send(prep_message_for(group))
+            state.prepared(group)
+            checkpoint()
+            counts["prep"] += 1
             if send_delay:
                 time.sleep(send_delay)
 
@@ -335,7 +358,7 @@ def main(argv=None):
         result = run_once(BoundedLotteClient(deadline), backend, telegram,
                           dry_run=args.mode == "dry-run", sweep_count=args.sweep_count,
                           days=args.days, deadline=deadline)
-        write_summary(f"영화관 {result['cinemas']}곳 · 시간표 {result['schedules']}건 · 무대인사 {result['stage_shows']}회차 · 전송 {result['sent']}건 · 오류 {result['errors']}건\n\n"
+        write_summary(f"영화관 {result['cinemas']}곳 · 시간표 {result['schedules']}건 · 무대인사 {result['stage_shows']}회차 · 예매 가능 알림 {result['sent']}건 · 상영준비중 알림 {result['prep']}건 · 오류 {result['errors']}건\n\n"
                       "첫 확인의 기존 회차는 기준 상태로 저장합니다. 다음 실행부터 새 회차/예매 가능 전환을 확인합니다.\n\n"
                       "공지에 없는 회차는 28일 시간표를 나누어 순회하므로 알림이 더 늦을 수 있습니다.")
         return 1 if result["errors"] else 0

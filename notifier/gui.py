@@ -283,7 +283,7 @@ class App:
         self.table.delete(*self.table.get_children())
         for show in sorted(self.shows.values(), key=lambda x: (x.day, x.start, x.cinema)):
             self.table.insert("", "end", iid=show.key, values=(show.movie, show.cinema, show.day,
-                show.start, show.screen, show.seats, "예매 가능" if show.bookable else "매진/대기"))
+                show.start, show.screen, show.seats, "예매 가능" if show.bookable else "상영준비중" if show.preparing else "매진/마감"))
         count = sum(s.bookable for s in self.shows.values())
         self.count.set(f"발견한 무대인사 {len(self.shows)}회차  ·  마지막 조회 시 예매 가능 {count}회차")
 

@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from notifier.cloud import (CloudState, DeadlineReached, GitHubState, encoded_state,
                             fresh_state, next_sweep, run_once, validate_state)
 from notifier.core import ServiceError
-from test_core import AT, cinemas, sample, show
+from test_core import AT, cinemas, prep_row, prep_show, sample, show
 
 
 class MemoryState:
@@ -48,6 +48,30 @@ class PublicStateTests(unittest.TestCase):
     def test_new_event_scope_after_baseline(self):
         state = CloudState(fresh_state())
         self.assertEqual(state.observe("1016:2026-10-31", [show()], True), [show()])
+
+    def test_preparing_then_opening_survives_restart(self):
+        state = CloudState(fresh_state())
+        prep = prep_show()
+        # 처음 보는 지점·날짜여도 상영준비중은 기준 상태로 묻지 않는다.
+        self.assertEqual(state.observe("1016:2026-10-31", [prep]), [])
+        self.assertEqual(state.preparing([prep]), [prep])
+        state.prepared([prep])
+        state = CloudState(json.loads(encoded_state(state.data)))
+        self.assertEqual(state.observe("1016:2026-10-31", [prep]), [])
+        self.assertEqual(state.preparing([prep]), [])
+        self.assertEqual(state.observe("1016:2026-10-31", [show()]), [show()])
+        state.delivered(show())
+        self.assertEqual(state.observe("1016:2026-10-31", [show()]), [])
+        self.assertEqual(state.preparing([prep]), [])
+
+    def test_existing_seen_record_from_old_version_gets_prep_alert(self):
+        # 이전 버전이 'seen'으로만 남긴 준비중 회차도 새 버전 첫 실행에서 알린다.
+        state = CloudState(fresh_state())
+        prep = prep_show()
+        state.observe("1016:2026-10-31", [prep])
+        old = json.loads(encoded_state(state.data))
+        self.assertEqual({row["status"] for row in old["shows"].values()}, {"seen"})
+        self.assertEqual(CloudState(old).preparing([prep]), [prep])
 
     def test_public_state_rejects_extra_sensitive_fields_and_bad_dates(self):
         for edit in (lambda s: s.update(token="must-not-publish"),
@@ -117,6 +141,38 @@ class CloudRunTests(unittest.TestCase):
         self.telegram.send.side_effect = None
         self.assertEqual(self.run_monitor()["sent"], 1)
         self.assertEqual(self.run_monitor()["sent"], 0)
+
+    def test_preparing_alert_once_then_opening_alert(self):
+        second = prep_row(PlaySequence=2, StartTime="19:00")
+        self.client.schedule.return_value = [prep_row(), second]
+        first = self.run_monitor()
+        self.assertEqual((first["prep"], first["sent"]), (1, 0))
+        self.assertIn("회차 2개", self.telegram.send.call_args.args[0])
+        self.assertEqual({s["status"] for s in self.backend.data["shows"].values()}, {"prep"})
+        again = self.run_monitor()
+        self.assertEqual((again["prep"], again["sent"]), (0, 0))
+        opened = sample()
+        opened_second = {**sample(), "PlaySequence": 2, "StartTime": "19:00"}
+        self.client.schedule.return_value = [opened, opened_second]
+        last = self.run_monitor()
+        self.assertEqual((last["prep"], last["sent"]), (0, 2))
+        self.assertEqual(self.run_monitor()["sent"], 0)
+        self.assertEqual(self.telegram.send.call_count, 3)
+
+    def test_preparing_delivery_failure_retries(self):
+        self.client.schedule.return_value = [prep_row()]
+        self.telegram.send.side_effect = ServiceError("temporary")
+        with self.assertRaises(ServiceError):
+            self.run_monitor()
+        self.assertEqual({s["status"] for s in self.backend.data["shows"].values()}, {"seen"})
+        self.telegram.send.side_effect = None
+        self.assertEqual(self.run_monitor()["prep"], 1)
+        self.assertEqual(self.run_monitor()["prep"], 0)
+
+    def test_dry_run_does_not_send_preparing_alert(self):
+        self.client.schedule.return_value = [prep_row()]
+        self.assertEqual(self.run_monitor(dry_run=True)["prep"], 0)
+        self.telegram.send.assert_not_called()
 
     def test_storage_failure_prevents_send(self):
         self.backend.data["initialized"] = True

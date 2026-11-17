@@ -186,6 +186,8 @@ class Screening:
     seats: int
     bookable: bool
     url: str
+    # IsBookingYN == "J": 시간표에는 올라왔지만 예매 오픈 전. 공식 화면 표기는 '상영준비중'.
+    preparing: bool = False
 
 
 def parse_screenings(rows, cinemas, at=None):
@@ -214,7 +216,8 @@ def parse_screenings(rows, cinemas, at=None):
         result.append(Screening(key, cid, str(row.get("CinemaNameKR") or cinemas[cid]["CinemaNameKR"]),
                                 str(row.get("MovieNameKR") or "제목 미확인"), day, start,
                                 str(row.get("ScreenNameKR") or row["ScreenID"]), seats,
-                                status == "Y" and seats > 0, BASE + "/NLCHS/Ticketing?" + query))
+                                status == "Y" and seats > 0, BASE + "/NLCHS/Ticketing?" + query,
+                                status == "J"))
     return result
 
 
@@ -224,6 +227,24 @@ def message_for(show):
             f"상영: {show.day} {show.start}\n잔여석: {show.seats}석 (조회 시점)\n\n"
             "아래 예매 페이지에서 날짜와 영화를 선택해 주세요.\n"
             f"{show.url}")
+
+
+def prep_groups(shows):
+    """상영준비중 회차를 같은 극장·날짜·영화끼리 묶는다. 묶음 하나가 메시지 하나."""
+    groups = {}
+    for show in sorted(shows, key=lambda s: (s.day, s.cinema, s.movie, s.start, s.screen)):
+        groups.setdefault((show.cinema_id, show.day, show.movie), []).append(show)
+    return list(groups.values())
+
+
+def prep_message_for(shows):
+    first = shows[0]
+    lines = "\n".join(f"· {s.start} {s.screen} ({s.seats}석)" for s in shows)
+    return ("🕒 롯데시네마 무대인사 상영준비중 (예매 오픈 전)\n\n"
+            f"영화: {first.movie}\n극장: {first.cinema}\n날짜: {first.day}\n"
+            f"회차 {len(shows)}개:\n{lines}\n\n"
+            "아직 예매할 수 없습니다. 예매가 열리면 다시 알려드립니다.\n"
+            f"{first.url}")
 
 
 class Telegram:
@@ -282,9 +303,10 @@ class StateStore:
             for show in shows:
                 previous = self.db.execute("SELECT payload FROM observations WHERE key=?", (show.key,)).fetchone()
                 status = self.db.execute("SELECT status FROM deliveries WHERE recipient=? AND key=?", (recipient, show.key)).fetchone()
-                if show.bookable and not status:
+                # 'prep'은 상영준비중 알림만 보낸 상태. 예매가 열리면 한 번 더 알린다.
+                if show.bookable and (not status or status[0] == "prep"):
                     # 처음 조회한 지점/날짜의 이미 열린 회차는 기본적으로 기존 상태로 저장.
-                    suppress = initial and previous is None and not notify_existing
+                    suppress = initial and previous is None and not status and not notify_existing
                     if suppress:
                         self.db.execute("INSERT INTO deliveries VALUES (?, ?, 'baseline')", (recipient, show.key))
                     else:
@@ -297,6 +319,16 @@ class StateStore:
     def delivered(self, recipient, show):
         with self.db:
             self.db.execute("INSERT OR REPLACE INTO deliveries VALUES (?, ?, 'sent')", (recipient, show.key))
+
+    def preparing(self, recipient, shows):
+        """상영준비중인데 아직 어떤 알림도 보내지 않은 회차."""
+        return [show for show in shows if show.preparing and not self.db.execute(
+            "SELECT 1 FROM deliveries WHERE recipient=? AND key=?", (recipient, show.key)).fetchone()]
+
+    def prepared(self, recipient, shows):
+        with self.db:
+            for show in shows:
+                self.db.execute("INSERT OR IGNORE INTO deliveries VALUES (?, ?, 'prep')", (recipient, show.key))
 
     def initialized(self, name):
         return bool(self.db.execute("SELECT 1 FROM metadata WHERE name=?", (name,)).fetchone())
@@ -392,6 +424,14 @@ class Monitor:
             self.telegram.send(message_for(show))
             self.store.delivered(self.recipient, show)
             self.emit("log", f"알림 전송: {show.movie} / {show.cinema} / {show.day} {show.start}")
+            if self.stop.wait(1.1):
+                raise Stopped()
+        for group in prep_groups(self.store.preparing(self.recipient, shows)):
+            if self.stop.is_set():
+                raise Stopped()
+            self.telegram.send(prep_message_for(group))
+            self.store.prepared(self.recipient, group)
+            self.emit("log", f"상영준비중 알림 전송: {group[0].movie} / {group[0].cinema} / {group[0].day} · {len(group)}회차")
             if self.stop.wait(1.1):
                 raise Stopped()
         self.scope_seen[scope] = time.monotonic()

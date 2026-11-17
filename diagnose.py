@@ -26,6 +26,7 @@ def main():
     result = {"checked_at": now_kst().isoformat(), "cinema_count": len(cinemas),
               "event_count": len(events), "schedule_count": len(targets),
               "screening_count": len(shows), "bookable_count": sum(s.bookable for s in shows),
+              "preparing_count": sum(s.preparing for s in shows),
               "screenings": [asdict(s) for s in shows]}
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "screenings"}, ensure_ascii=False))

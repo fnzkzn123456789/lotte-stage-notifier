@@ -10,8 +10,8 @@ from unittest.mock import Mock
 from unittest.mock import patch
 
 from notifier.core import (KST, LotteClient, Monitor, Screening, ServiceError, StateStore,
-                           Telegram, is_stage, load_settings, parse_screenings,
-                           recipient_key, save_settings, show_time)
+                           Telegram, is_stage, load_settings, parse_screenings, prep_groups,
+                           prep_message_for, recipient_key, save_settings, show_time)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TEMP_ROOT = Path(__file__).resolve().parent / ".tmp"
@@ -31,6 +31,17 @@ def show(bookable=True):
     value = sample()
     value["IsBookingYN"] = "Y" if bookable else "N"
     return parse_screenings([value], cinemas(), AT)[0]
+
+
+def prep_row(**changes):
+    """상영준비중(J) 회차. 실제 응답처럼 잔여석이 전체 좌석과 같다."""
+    value = sample()
+    value.update(IsBookingYN="J", **changes)
+    return value
+
+
+def prep_show(**changes):
+    return parse_screenings([prep_row(**changes)], cinemas(), AT)[0]
 
 
 class DetectionTests(unittest.TestCase):
@@ -66,6 +77,27 @@ class DetectionTests(unittest.TestCase):
         row = sample()
         row["BookingSeatCount"] = 0
         self.assertFalse(parse_screenings([row], cinemas(), AT)[0].bookable)
+
+    def test_only_j_status_is_preparing(self):
+        self.assertTrue(prep_show().preparing)
+        self.assertFalse(prep_show().bookable)
+        for status in ["Y", "N", "E"]:
+            row = sample()
+            row["IsBookingYN"] = status
+            self.assertFalse(parse_screenings([row], cinemas(), AT)[0].preparing)
+
+    def test_prep_message_groups_same_cinema_day_movie(self):
+        early, late = prep_show(StartTime="13:00", PlaySequence=1), prep_show(StartTime="17:10", PlaySequence=2)
+        other = prep_show(MovieNameKR="다른 영화", MovieCode="99999")
+        groups = prep_groups([late, other, early])
+        self.assertEqual(sorted(len(g) for g in groups), [1, 2])
+        pair = next(g for g in groups if len(g) == 2)
+        self.assertEqual(pair, [early, late])
+        text = prep_message_for(pair)
+        self.assertIn("상영준비중", text)
+        self.assertIn("회차 2개", text)
+        self.assertLess(text.index("13:00"), text.index("17:10"))
+        self.assertNotIn("다른 영화", text)
 
     def test_missing_or_unknown_fields_fail_closed(self):
         row = sample()
@@ -124,6 +156,31 @@ class StateTests(unittest.TestCase):
         self.store.delivered("me", show())
         self.store.observe("scope", [show(False)], "me")
         self.assertEqual(self.store.observe("scope", [show()], "me"), [])
+
+    def test_preparing_notified_once_then_opening_notified_once(self):
+        prep = prep_show()
+        self.assertEqual(self.store.observe("scope", [prep], "me"), [])
+        self.assertEqual(self.store.preparing("me", [prep]), [prep])
+        # 전송 실패(기록 안 함) 뒤 재시작해도 다시 시도한다.
+        self.store.close()
+        self.store = StateStore(self.path)
+        self.assertEqual(self.store.preparing("me", [prep]), [prep])
+        self.store.prepared("me", [prep])
+        self.assertEqual(self.store.preparing("me", [prep]), [])
+        self.assertEqual(self.store.observe("scope", [show()], "me"), [show()])
+        self.store.delivered("me", show())
+        self.assertEqual(self.store.observe("scope", [show()], "me"), [])
+        self.assertEqual(self.store.preparing("me", [prep]), [])
+
+    def test_preparing_in_first_seen_scope_is_not_baselined(self):
+        prep = prep_show()
+        self.store.observe("scope", [prep], "me")
+        self.store.prepared("me", [prep])
+        self.assertEqual(self.store.observe("scope", [show()], "me"), [show()])
+
+    def test_baseline_or_sent_show_never_gets_prep_alert(self):
+        self.store.observe("scope", [show()], "me")
+        self.assertEqual(self.store.preparing("me", [prep_show()]), [])
 
     def test_recipient_isolation(self):
         self.store.delivered("one", show())
@@ -206,6 +263,26 @@ class MonitorIntegrationTests(unittest.TestCase):
         with patch("notifier.core.now_kst", return_value=AT):
             self.monitor.check_schedule("1016", "2026-10-31", force=True)
             self.monitor.telegram.send.side_effect = [ServiceError("send failed"), None]
+            with self.assertRaises(ServiceError):
+                self.monitor.check_schedule("1016", "2026-10-31", force=True)
+            self.monitor.check_schedule("1016", "2026-10-31", force=True)
+            self.monitor.check_schedule("1016", "2026-10-31", force=True)
+        self.assertEqual(self.monitor.telegram.send.call_count, 2)
+
+    def test_preparing_alert_then_opening_alert(self):
+        self.monitor.client.schedule.side_effect = [[prep_row()], [prep_row()], [sample()], [sample()]]
+        with patch("notifier.core.now_kst", return_value=AT):
+            for _ in range(4):
+                self.monitor.check_schedule("1016", "2026-10-31", force=True)
+        texts = [call.args[0] for call in self.monitor.telegram.send.call_args_list]
+        self.assertEqual(len(texts), 2)
+        self.assertIn("상영준비중", texts[0])
+        self.assertIn("예매 가능", texts[1])
+
+    def test_preparing_send_failure_retries(self):
+        self.monitor.client.schedule.return_value = [prep_row()]
+        self.monitor.telegram.send.side_effect = [ServiceError("send failed"), None]
+        with patch("notifier.core.now_kst", return_value=AT):
             with self.assertRaises(ServiceError):
                 self.monitor.check_schedule("1016", "2026-10-31", force=True)
             self.monitor.check_schedule("1016", "2026-10-31", force=True)
