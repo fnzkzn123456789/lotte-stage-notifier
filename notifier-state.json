@@ -1,10 +1,10 @@
 {
   "cursor": {
     "anchor": "2026-11-17",
-    "index": 1324
+    "index": 1504
   },
   "initialized": true,
-  "last_success": "2026-11-17T14:25:26+09:00",
+  "last_success": "2026-11-17T15:31:24+09:00",
   "scopes": {
     "1001:2026-11-15": true,
     "1001:2026-11-16": true,
@@ -1835,6 +1835,10 @@
     "9132:2026-12-13": true
   },
   "shows": {
+    "02c71f3790c597c621a530e1b84cce42ffef3fb0666797aecc8271251b044ae2": {
+      "day": "2026-11-22",
+      "status": "seen"
+    },
     "0b7508fd842bcfa364ca360517d854e8888cbd066bd750445db5d73a78dd45e3": {
       "day": "2026-11-28",
       "status": "sent"
@@ -1858,6 +1862,18 @@
     "3606215cfdb0e8d7c51aa86771cf9ebddd76c93c7f91303ce08e36f5a97103b7": {
       "day": "2026-11-15",
       "status": "sent"
+    },
+    "3b73fd93a9d307e74653582e8d66e3e215bd160527e4cb944f2556dc3676d2e4": {
+      "day": "2026-11-22",
+      "status": "seen"
+    },
+    "436f0a70d886a5ba23ac470bb2c5fa5c08845f46f7b430af15246d9e838bf620": {
+      "day": "2026-11-22",
+      "status": "seen"
+    },
+    "4d966633a9f73637cdb8f4b324c1fc2f61b950316168306573ca5c7638866dc7": {
+      "day": "2026-11-22",
+      "status": "seen"
     },
     "5a7e8d2b5c6c15ed82a935b81a69f8cc10bfc97249ed54c0f2e492ec6869978c": {
       "day": "2026-11-18",
@@ -1919,9 +1935,21 @@
       "day": "2026-11-18",
       "status": "sent"
     },
+    "c83cb25232353417399da95c6835504c2072490dbd0b55af0080e341cbd805aa": {
+      "day": "2026-11-22",
+      "status": "seen"
+    },
+    "e4ef15ed44f812a5ee5c4fe084c0b06f0674655583222c3255024657f9ce8983": {
+      "day": "2026-11-22",
+      "status": "seen"
+    },
     "e8cf4b1999ae6ae81d540116b9cfe99d8360498ee87855c2acf48b6ea9ac4419": {
       "day": "2026-11-29",
       "status": "sent"
+    },
+    "fb1fb6d3f3d4e890a8dd5832966aeddf5518cc67e3d08cfb1511434d364ab9ec": {
+      "day": "2026-11-22",
+      "status": "seen"
     }
   },
   "version": 1
