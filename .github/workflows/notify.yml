@@ -2,6 +2,8 @@ name: Lotte Stage Notifier
 
 on:
   schedule:
+    # 예약 실행은 '감시가 멈춰 있으면 다시 시작'하는 역할입니다.
+    # 감시가 이미 돌고 있으면 몇 초 만에 조회 없이 끝납니다.
     - cron: '2-57/5 * * * *'
   workflow_dispatch:
     inputs:
@@ -14,23 +16,32 @@ on:
           - dry-run
           - test
           - check
+      handoff:
+        description: '자동 이어받기 전용입니다. 직접 실행할 때는 false로 두세요.'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: write
-
-concurrency:
-  group: lotte-stage-notifier
-  cancel-in-progress: false
+  # 다른 실행이 돌고 있는지 확인하고, 끝날 때 다음 실행을 시작시키는 데 씁니다.
+  actions: write
 
 jobs:
   notify:
     # 무료 운영 보호: 비공개 저장소에서는 실행하지 않습니다.
-    # 예약 실행은 Secrets 등록 후 MONITOR_ENABLED=true로 직접 켭니다.
+    # 예약 실행과 자동 이어받기는 MONITOR_ENABLED=true일 때만 돕니다.
+    # 직접 누른 실행(test/dry-run/check)은 변수와 관계없이 한 번 실행합니다.
     if: >-
       github.event.repository.private == false &&
-      (github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED == 'true')
+      (vars.MONITOR_ENABLED == 'true' ||
+       (github.event_name == 'workflow_dispatch' && inputs.handoff != 'true'))
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # 반복 감시 5시간(18000초) + 준비·마무리 여유
+    timeout-minutes: 320
     steps:
       - name: Check out code
         uses: actions/checkout@v7
@@ -44,8 +55,17 @@ jobs:
       - name: Check and notify
         env:
           PYTHONUTF8: '1'
+          PYTHONUNBUFFERED: '1'
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ github.token }}
           RUN_MODE: ${{ inputs.mode || 'check' }}
-        run: python -m notifier.cloud --mode "$RUN_MODE" --github-state --sweep-count 180 --days 28 --max-seconds 220
+          HANDOFF: ${{ inputs.handoff || 'false' }}
+          # 예약 실행과 자동 이어받기만 오래 머물며 반복 감시합니다.
+          LONG_RUN: ${{ (github.event_name == 'schedule' || inputs.handoff == 'true') && 'true' || 'false' }}
+        run: |
+          if [ "$LONG_RUN" = "true" ]; then
+            python -m notifier.cloud --mode check --github-state --days 28 --loop --interval 60 --sweep-count 15 --max-seconds 18000
+          else
+            python -m notifier.cloud --mode "$RUN_MODE" --github-state --days 28 --sweep-count 180 --max-seconds 220
+          fi

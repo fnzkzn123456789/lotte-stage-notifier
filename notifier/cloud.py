@@ -1,4 +1,4 @@
-"""GitHub Actions용 단발 실행. PC GUI/Windows 자격증명에 의존하지 않는다."""
+"""GitHub Actions용 실행(단발 또는 장시간 반복). PC GUI/Windows 자격증명에 의존하지 않는다."""
 from __future__ import annotations
 
 import argparse
@@ -19,8 +19,12 @@ from .core import (LotteClient, ServiceError, Telegram, is_stage, message_for, n
                    parse_screenings, prep_groups, prep_message_for)
 
 
+WORKFLOW = "notify.yml"
+
+
 def fresh_state():
-    return {"version": 1, "initialized": False, "scopes": {}, "shows": {},
+    # watch: 상영준비중 회차가 있어 매 주기 다시 확인할 지점·날짜.
+    return {"version": 1, "initialized": False, "scopes": {}, "shows": {}, "watch": {},
             "cursor": {"anchor": "", "index": 0}, "last_success": ""}
 
 
@@ -34,12 +38,16 @@ def valid_day(value):
 def validate_state(data):
     # 공개 브랜치에는 아래의 고정된 항목만 허용한다. 토큰/대화 ID/사용자 설정은 저장하지 않는다.
     try:
-        assert isinstance(data, dict) and set(data) == set(fresh_state())
+        assert isinstance(data, dict)
+        # 'watch'는 나중에 추가한 항목이라 이전 기록에는 없다. 빈 값으로 채워 이어 쓴다.
+        data.setdefault("watch", {})
+        assert set(data) == set(fresh_state())
         assert data["version"] == 1 and isinstance(data["initialized"], bool)
-        assert isinstance(data["scopes"], dict) and len(data["scopes"]) < 20000
-        for key, value in data["scopes"].items():
-            cid, day = key.split(":")
-            assert cid.isdigit() and valid_day(day) and value is True
+        for name, limit in (("scopes", 20000), ("watch", 2000)):
+            assert isinstance(data[name], dict) and len(data[name]) < limit
+            for key, value in data[name].items():
+                cid, day = key.split(":")
+                assert cid.isdigit() and valid_day(day) and value is True
         assert isinstance(data["shows"], dict) and len(data["shows"]) < 10000
         for key, row in data["shows"].items():
             assert re.fullmatch(r"[0-9a-f]{64}", key)
@@ -101,13 +109,15 @@ class GitHubState:
         }, method=method)
         try:
             with urllib.request.urlopen(req, timeout=25) as response:
-                return json.loads(response.read(2_000_001))
+                raw = response.read(2_000_001)
+                # 실행 시작 요청(dispatch)처럼 본문 없이 성공하는 응답도 있다.
+                return json.loads(raw) if raw.strip() else None
         except urllib.error.HTTPError as exc:
             if exc.code == 404 and allow_missing:
                 return None
-            raise ServiceError(f"GitHub 알림 기록 접근 실패 (HTTP {exc.code}). 저장소 쓰기 권한과 실행 상태를 확인하세요.") from None
+            raise ServiceError(f"GitHub 요청 실패 (HTTP {exc.code}). 저장소 권한과 실행 상태를 확인하세요.") from None
         except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-            raise ServiceError("GitHub 알림 기록을 읽거나 저장할 수 없습니다. 알림 전송을 중단합니다.") from None
+            raise ServiceError("GitHub에 연결할 수 없습니다. 알림 전송을 중단합니다.") from None
 
     def load(self):
         repo = self.request("GET", "")
@@ -184,10 +194,21 @@ class CloudState:
         for show in shows:
             self.data["shows"][hashlib.sha256(show.key.encode()).hexdigest()]["status"] = "prep"
 
+    def track(self, scope, shows):
+        """상영준비중 회차가 남아 있는 지점·날짜만 매 주기 재확인 목록에 둔다."""
+        if any(show.preparing for show in shows):
+            self.data["watch"][scope] = True
+        else:
+            self.data["watch"].pop(scope, None)
+
+    def watched(self):
+        return [tuple(scope.split(":", 1)) for scope in self.data["watch"]]
+
     def prune(self):
         cutoff = (now_kst().date() - timedelta(days=2)).isoformat()
         self.data["shows"] = {k: v for k, v in self.data["shows"].items() if v["day"] >= cutoff}
-        self.data["scopes"] = {k: v for k, v in self.data["scopes"].items() if k.split(":", 1)[1] >= cutoff}
+        for name in ("scopes", "watch"):
+            self.data[name] = {k: v for k, v in self.data[name].items() if k.split(":", 1)[1] >= cutoff}
 
 
 class DeadlineReached(Exception):
@@ -224,101 +245,239 @@ def next_sweep(state, cinemas, days):
     return next_sweep(state, cinemas, days)
 
 
-def run_once(client, backend, telegram=None, *, dry_run=False, sweep_count=180, days=28,
-             deadline=None, send_delay=1.1):
-    state = CloudState(fresh_state() if dry_run else backend.load())
-    errors, checked = [], set()
-    counts = {"cinemas": 0, "events": 0, "schedules": 0, "stage_shows": 0, "sent": 0, "prep": 0,
-              "deferred": False}
+class Session:
+    """한 번의 실행(단발 또는 반복)이 함께 쓰는 조회·전송·저장 상태."""
 
-    def checkpoint():
-        if not dry_run:
-            backend.save(state.data)
+    def __init__(self, client, backend, telegram=None, *, dry_run=False, days=28, deadline=None,
+                 send_delay=1.1, clock=time.monotonic, sleep=time.sleep):
+        self.client, self.backend, self.telegram = client, backend, telegram
+        self.dry_run, self.days, self.deadline = dry_run, days, deadline
+        self.send_delay, self.clock, self.sleep = send_delay, clock, sleep
+        self.state = CloudState(fresh_state() if dry_run else backend.load())
+        self.cinemas, self.errors, self.checked = {}, [], set()
+        self.counts = {"cinemas": 0, "events": 0, "schedules": 0, "stage_shows": 0, "sent": 0,
+                       "prep": 0, "deferred": False}
+        # 공지 상세는 공지 목록이 그대로인 동안 잠시 재사용한다(반복 실행의 요청 수를 줄임).
+        self.notice, self.notice_ids, self.notice_at = set(), None, None
 
-    def check(cid, day, new_scope=False):
-        if (cid, day) in checked:
+    def checkpoint(self):
+        if not self.dry_run:
+            self.backend.save(self.state.data)
+
+    def expired(self):
+        return self.deadline is not None and self.clock() >= self.deadline
+
+    def load_cinemas(self):
+        cinemas = self.client.cinemas()
+        if not cinemas:
+            raise ServiceError("감시할 영화관이 없습니다.")
+        self.cinemas = cinemas
+        self.counts["cinemas"] = len(cinemas)
+
+    def check(self, cid, day, new_scope=False):
+        if (cid, day) in self.checked:
             return
-        if deadline is not None and time.monotonic() >= deadline:
+        if self.expired():
             raise DeadlineReached()
         try:
-            rows = client.schedule(cinemas[cid], day)
-            shows = parse_screenings(rows, cinemas)
+            rows = self.client.schedule(self.cinemas[cid], day)
+            shows = parse_screenings(rows, self.cinemas)
         except ServiceError as exc:
             if exc.retry_after > 60:
                 raise
-            errors.append(f"상영시간표 {cid}/{day}: {exc}")
+            self.errors.append(f"상영시간표 {cid}/{day}: {exc}")
             return
-        pending = state.observe(f"{cid}:{day}", shows, new_scope)
-        checked.add((cid, day))
-        counts["schedules"] += 1
-        counts["stage_shows"] += len(shows)
-        if dry_run:
+        scope = f"{cid}:{day}"
+        pending = self.state.observe(scope, shows, new_scope)
+        self.state.track(scope, shows)
+        self.checked.add((cid, day))
+        self.counts["schedules"] += 1
+        self.counts["stage_shows"] += len(shows)
+        if self.dry_run:
             return
         for show in pending:
-            if deadline is not None and time.monotonic() >= deadline:
+            if self.expired():
                 raise DeadlineReached()
-            # 기준/미전송 기록을 먼저 보존. 전송 실패는 다음 실행에서 재시도한다.
-            checkpoint()
-            telegram.send(message_for(show))
-            state.delivered(show)
-            # 저장 실패 시 즉시 종료해 추가 전송으로 중복 가능성을 키우지 않는다.
-            checkpoint()
-            counts["sent"] += 1
-            if send_delay:
-                time.sleep(send_delay)
+            # 기준/미전송 기록을 먼저 보존. 전송 실패는 다음 확인에서 재시도한다.
+            self.checkpoint()
+            self.telegram.send(message_for(show))
+            self.state.delivered(show)
+            # 저장 실패 시 즉시 멈춰 추가 전송으로 중복 가능성을 키우지 않는다.
+            self.checkpoint()
+            self.counts["sent"] += 1
+            if self.send_delay:
+                self.sleep(self.send_delay)
         # 예매 가능 알림을 먼저 보낸 뒤, 상영준비중 회차를 극장·날짜·영화별로 묶어 알린다.
-        for group in prep_groups(state.preparing(shows)):
-            if deadline is not None and time.monotonic() >= deadline:
+        for group in prep_groups(self.state.preparing(shows)):
+            if self.expired():
                 raise DeadlineReached()
-            checkpoint()
-            telegram.send(prep_message_for(group))
-            state.prepared(group)
-            checkpoint()
-            counts["prep"] += 1
-            if send_delay:
-                time.sleep(send_delay)
+            self.checkpoint()
+            self.telegram.send(prep_message_for(group))
+            self.state.prepared(group)
+            self.checkpoint()
+            self.counts["prep"] += 1
+            if self.send_delay:
+                self.sleep(self.send_delay)
 
-    try:
-        cinemas = client.cinemas()
-        if not cinemas:
-            raise ServiceError("감시할 영화관이 없습니다.")
-        counts["cinemas"] = len(cinemas)
-        events = client.events()
-        counts["events"] = len(events)
-        targets = set()
-        for event in events:
+    def notice_targets(self, max_age=0):
+        """이벤트 공지에 올라온 수도권 무대인사의 (지점, 날짜)."""
+        events = self.client.events()
+        self.counts["events"] = len(events)
+        ids = [str(event["EventID"]) for event in events]
+        today = now_kst().date().isoformat()
+        if (self.notice_at is not None and ids == self.notice_ids
+                and self.clock() - self.notice_at < max_age):
+            return {(cid, day) for cid, day in self.notice if day >= today}
+        targets, complete = set(), True
+        for event_id in ids:
             try:
-                for row in client.event_rows(str(event["EventID"])):
+                for row in self.client.event_rows(event_id):
                     cid, day = str(row.get("CinemaID", "")), str(row.get("PlayDate", ""))[:10]
-                    if cid in cinemas and is_stage(row):
+                    if cid in self.cinemas and is_stage(row):
                         if not valid_day(day):
                             raise ServiceError("무대인사 공지의 날짜 형식이 바뀌었습니다.")
-                        if day >= now_kst().date().isoformat():
+                        if day >= today:
                             targets.add((cid, day))
             except ServiceError as exc:
                 if exc.retry_after > 60:
                     raise
-                errors.append(f"이벤트 조회: {exc}")
-        for cid, day in sorted(targets, key=lambda x: (x[1], x[0])):
-            check(cid, day, state.data["initialized"])
-        if not errors:
-            state.data["initialized"] = True
-            state.data["last_success"] = now_kst().replace(microsecond=0).isoformat()
-        for _ in range(sweep_count):
-            if deadline is not None and time.monotonic() >= deadline:
+                self.errors.append(f"이벤트 조회: {exc}")
+                complete = False
+        # 일부라도 실패했으면 재사용하지 않고 다음 확인에서 전부 다시 받는다.
+        self.notice, self.notice_ids = targets, ids if complete else None
+        self.notice_at = self.clock() if complete else None
+        return targets
+
+    def check_targets(self, max_age=0):
+        """공지에 있는 회차와 상영준비중으로 지켜보는 회차의 시간표를 확인한다."""
+        targets = self.notice_targets(max_age)
+        today = now_kst().date().isoformat()
+        watch = {(cid, day) for cid, day in self.state.watched()
+                 if cid in self.cinemas and day >= today}
+        for cid, day in sorted(targets | watch, key=lambda x: (x[1], x[0])):
+            self.check(cid, day, self.state.data["initialized"])
+        if not self.errors:
+            self.state.data["initialized"] = True
+            self.state.data["last_success"] = now_kst().replace(microsecond=0).isoformat()
+
+    def sweep(self, count, until=None, minimum=0):
+        """공지에 없는 회차를 찾는 전체 순회. until이 지나면 minimum건만 채우고 멈춘다."""
+        for done in range(count):
+            if self.expired():
                 raise DeadlineReached()
-            cid, day = next_sweep(state, cinemas, days)
-            check(cid, day)
+            if until is not None and done >= minimum and self.clock() >= until:
+                break
+            cid, day = next_sweep(self.state, self.cinemas, self.days)
+            self.check(cid, day)
+
+    def finish(self):
+        self.state.prune()
+        self.checkpoint()
+
+
+def run_once(client, backend, telegram=None, *, dry_run=False, sweep_count=180, days=28,
+             deadline=None, send_delay=1.1):
+    session = Session(client, backend, telegram, dry_run=dry_run, days=days, deadline=deadline,
+                      send_delay=send_delay)
+    try:
+        session.load_cinemas()
+        session.check_targets()
+        session.sweep(sweep_count)
     except DeadlineReached:
-        counts["deferred"] = True
+        session.counts["deferred"] = True
     finally:
-        state.prune()
-        checkpoint()
-    counts["errors"] = len(errors)
-    for error in errors[:5]:
+        session.finish()
+    counts = session.counts
+    counts["errors"] = len(session.errors)
+    for error in session.errors[:5]:
         print(error, file=sys.stderr)
     print(json.dumps(counts, ensure_ascii=False))
     return counts
+
+
+def run_loop(client, backend, telegram, *, deadline, days=28, interval=60, sweep_count=15,
+             notice_refresh=300, cinema_refresh=900, save_every=600, max_failures=10,
+             send_delay=1.1, clock=time.monotonic, sleep=time.sleep):
+    """deadline까지 interval초마다 확인을 되풀이한다. 일시적인 오류로는 멈추지 않는다."""
+    session = Session(client, backend, telegram, days=days, deadline=deadline,
+                      send_delay=send_delay, clock=clock, sleep=sleep)
+    totals = {"cycles": 0, "error_cycles": 0, "errors": 0, "aborted": False}
+    failures, saved_at, cinemas_at = 0, clock(), None
+    try:
+        while clock() < deadline:
+            began, fatal, pause = clock(), False, 0
+            session.errors, session.checked = [], set()
+            alerts = session.counts["sent"] + session.counts["prep"]
+            try:
+                if cinemas_at is None or began - cinemas_at >= cinema_refresh:
+                    session.load_cinemas()
+                    cinemas_at = began
+                session.check_targets(notice_refresh)
+                session.sweep(sweep_count, until=began + interval, minimum=min(3, sweep_count))
+                # 순회 위치 같은 진행 기록은 가끔만 저장한다(알림 전후 저장은 check가 따로 한다).
+                if clock() - saved_at >= save_every:
+                    session.state.prune()
+                    session.checkpoint()
+                    saved_at = clock()
+            except DeadlineReached:
+                break
+            except ServiceError as exc:
+                # 목록 조회·전송·저장 실패는 이번 확인만 건너뛰고 다음 확인에서 다시 한다.
+                fatal = True
+                session.errors.append(str(exc))
+                pause = min(300, max(0, exc.retry_after - interval))
+            totals["cycles"] += 1
+            failures = failures + 1 if fatal else 0
+            if session.errors:
+                totals["error_cycles"] += 1
+                totals["errors"] += len(session.errors)
+                print(f"확인 오류 {len(session.errors)}건: {session.errors[0]}", file=sys.stderr, flush=True)
+            if session.counts["sent"] + session.counts["prep"] != alerts:
+                print(f"알림 전송 누적: 예매 가능 {session.counts['sent']}건 · 상영준비중 {session.counts['prep']}건",
+                      flush=True)
+            if failures >= max_failures:
+                # 계속 실패하면 끝낸다. 다음 예약 실행이 새로 시작한다.
+                totals["aborted"] = True
+                break
+            wait = min(began + interval + pause, deadline) - clock()
+            if wait > 0:
+                sleep(wait)
+    finally:
+        session.finish()
+    result = {key: value for key, value in session.counts.items() if key not in ("deferred", "stage_shows")}
+    result.update(totals)
+    print(json.dumps(result, ensure_ascii=False), flush=True)
+    return result
+
+
+class RunGuard:
+    """같은 워크플로의 실행이 겹치지 않게 한다. 먼저 만들어진 실행이 우선한다."""
+
+    def __init__(self, api, run_number, workflow=WORKFLOW, clock=time.monotonic, sleep=time.sleep):
+        self.api, self.run_number, self.workflow = api, run_number, workflow
+        self.clock, self.sleep = clock, sleep
+
+    def older_active(self):
+        data = self.api.request("GET", f"/actions/workflows/{self.workflow}/runs?per_page=30")
+        try:
+            return [run for run in data["workflow_runs"]
+                    if run["status"] != "completed" and int(run["run_number"]) < self.run_number]
+        except (KeyError, TypeError, ValueError):
+            raise ServiceError("GitHub 실행 목록 형식을 확인할 수 없습니다.") from None
+
+    def my_turn(self, handoff, patience=600, poll=10):
+        """True면 감시를 시작한다. 이어받기 실행만 앞 실행이 끝나기를 기다린다."""
+        started = self.clock()
+        while self.older_active():
+            if not handoff or self.clock() - started >= patience:
+                return False
+            self.sleep(poll)
+        return True
+
+    def hand_off(self, ref):
+        """끝나기 직전에 다음 실행을 시작시켜 감시가 끊기지 않게 한다."""
+        self.api.request("POST", f"/actions/workflows/{self.workflow}/dispatches",
+                         {"ref": ref, "inputs": {"mode": "check", "handoff": "true"}})
 
 
 def write_summary(text):
@@ -335,9 +494,16 @@ def main(argv=None):
     parser.add_argument("--sweep-count", type=int, default=180)
     parser.add_argument("--days", type=int, default=28)
     parser.add_argument("--max-seconds", type=int, default=220)
+    parser.add_argument("--loop", action="store_true",
+                        help="max-seconds 동안 interval초마다 반복 확인 (sweep-count는 한 번 확인당 개수)")
+    parser.add_argument("--interval", type=int, default=60)
     args = parser.parse_args(argv)
-    if not 0 <= args.sweep_count <= 500 or not 1 <= args.days <= 42 or not 30 <= args.max_seconds <= 480:
-        parser.error("조회 개수 0~500, 날짜 범위 1~42, 실행 시간 30~480초를 사용하세요.")
+    longest = 21000 if args.loop else 480
+    if (not 0 <= args.sweep_count <= 500 or not 1 <= args.days <= 42
+            or not 30 <= args.max_seconds <= longest or not 30 <= args.interval <= 600):
+        parser.error(f"조회 개수 0~500, 날짜 범위 1~42, 실행 시간 30~{longest}초, 확인 간격 30~600초를 사용하세요.")
+    if args.loop and args.mode != "check":
+        parser.error("--loop는 check 모드에서만 사용합니다.")
     try:
         telegram = None
         if args.mode != "dry-run":
@@ -354,7 +520,31 @@ def main(argv=None):
             return 0
         backend = (GitHubState(os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_TOKEN", ""))
                    if args.github_state and args.mode != "dry-run" else LocalState(args.state))
+        guard = None
+        run_number = os.environ.get("GITHUB_RUN_NUMBER", "")
+        if isinstance(backend, GitHubState) and run_number.isdigit():
+            # 감시 기록을 두 실행이 동시에 쓰지 않도록, 먼저 시작한 실행이 있으면 물러난다.
+            guard = RunGuard(backend, int(run_number))
+            if not guard.my_turn(os.environ.get("HANDOFF") == "true"):
+                print("다른 감시 실행이 진행 중입니다. 이 실행은 조회 없이 끝냅니다.")
+                write_summary("다른 감시 실행이 이미 진행 중이어서 이 실행은 조회 없이 끝냈습니다. 정상 동작입니다.")
+                return 0
         deadline = time.monotonic() + args.max_seconds
+        if args.loop:
+            result = run_loop(BoundedLotteClient(deadline), backend, telegram, deadline=deadline,
+                              days=args.days, interval=args.interval, sweep_count=args.sweep_count)
+            write_summary(f"반복 감시 {result['cycles']}회 확인 · 시간표 조회 누적 {result['schedules']}건 · 예매 가능 알림 {result['sent']}건 · 상영준비중 알림 {result['prep']}건 · 오류가 있던 확인 {result['error_cycles']}회\n\n"
+                          f"약 {args.interval}초마다 공지된 회차와 상영준비중 회차를 확인하고, 그 사이에 28일 시간표를 나누어 순회합니다.")
+            if result["aborted"]:
+                write_summary("오류가 계속되어 감시를 끝냈습니다. 다음 예약 실행이 새로 시작합니다.")
+            elif guard:
+                try:
+                    guard.hand_off(os.environ.get("GITHUB_REF_NAME") or "main")
+                    write_summary("다음 실행을 시작시켰습니다. 감시가 이어집니다.")
+                except ServiceError as exc:
+                    print(f"다음 실행을 시작시키지 못했습니다: {exc}", file=sys.stderr)
+                    write_summary("다음 실행을 시작시키지 못했습니다. 다음 예약 실행이 새로 시작합니다.")
+            return 1 if result["aborted"] or result["error_cycles"] * 2 > result["cycles"] else 0
         result = run_once(BoundedLotteClient(deadline), backend, telegram,
                           dry_run=args.mode == "dry-run", sweep_count=args.sweep_count,
                           days=args.days, deadline=deadline)
