@@ -1958,6 +1958,10 @@
       "day": "2026-11-29",
       "status": "sent"
     },
+    "469128f6bddb4f8f79ee2f3cd1b89bb209b25061cea5e7ff0bdc79aa2d02c4c4": {
+      "day": "2026-11-29",
+      "status": "seen"
+    },
     "46f71b323fba1629dcfc96a6f15b75c841432af7439e4d3d227b68e87b7138fa": {
       "day": "2026-11-25",
       "status": "sent"
@@ -2009,6 +2013,10 @@
     "915f9f5de336b50989ef5e0e691e2dcbb153a822aec99805bb0c124ef91ca7a6": {
       "day": "2026-11-22",
       "status": "sent"
+    },
+    "968438af9c74ed11fd9c6036ccb1e84cf0d115465011acee4ac97f8101923395": {
+      "day": "2026-11-29",
+      "status": "seen"
     },
     "9af6a49ce75b529a744fa6ac3c0c14700c822d9e1cf7f4f515d9f65506395dac": {
       "day": "2026-11-28",
