@@ -1,10 +1,10 @@
 {
   "cursor": {
     "anchor": "2026-11-22",
-    "index": 1737
+    "index": 123
   },
   "initialized": true,
-  "last_success": "2026-11-22T08:42:51+09:00",
+  "last_success": "2026-11-22T08:52:50+09:00",
   "scopes": {
     "1001:2026-11-20": true,
     "1001:2026-11-21": true,
