@@ -1,10 +1,10 @@
 {
   "cursor": {
     "anchor": "2026-11-24",
-    "index": 462
+    "index": 522
   },
   "initialized": true,
-  "last_success": "2026-11-24T16:20:58+09:00",
+  "last_success": "2026-11-24T16:24:58+09:00",
   "scopes": {
     "1001:2026-11-22": true,
     "1001:2026-11-23": true,
@@ -1930,6 +1930,10 @@
       "day": "2026-11-25",
       "status": "sent"
     },
+    "2dc32639788f0cf0c24595bbb4f4492c4996629ee6b85af737abb8cc7af1fcae": {
+      "day": "2026-12-06",
+      "status": "seen"
+    },
     "2f60d1b462809a589a3c7e5b0913a8d62714d1e9e8d827f480c906d7f1034418": {
       "day": "2026-11-25",
       "status": "sent"
@@ -1941,6 +1945,10 @@
     "336ff4fe0d8d0066075814694d6ea3f314e705a853435fe14abc7cccd636c480": {
       "day": "2026-11-25",
       "status": "sent"
+    },
+    "36420393dd21b0bd63833d8abc357faae48daeeb23ef8c0f2af936cf0c4ecf5b": {
+      "day": "2026-12-06",
+      "status": "seen"
     },
     "3b73fd93a9d307e74653582e8d66e3e215bd160527e4cb944f2556dc3676d2e4": {
       "day": "2026-11-22",
@@ -1965,6 +1973,10 @@
     "4d966633a9f73637cdb8f4b324c1fc2f61b950316168306573ca5c7638866dc7": {
       "day": "2026-11-22",
       "status": "sent"
+    },
+    "5474c37cf82c079831847aaa9c6d0ce3b71e583e86cb3a15ce2510c6c5eda67e": {
+      "day": "2026-12-06",
+      "status": "seen"
     },
     "5cbc23b38eeca6d5a2ac9378683d1d37b41b32fd70c5f2691276b344ff9f6360": {
       "day": "2026-11-29",
