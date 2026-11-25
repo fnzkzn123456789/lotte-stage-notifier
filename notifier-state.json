@@ -1,10 +1,10 @@
 {
   "cursor": {
     "anchor": "2026-11-25",
-    "index": 855
+    "index": 870
   },
   "initialized": true,
-  "last_success": "2026-11-25T10:29:21+09:00",
+  "last_success": "2026-11-25T10:30:06+09:00",
   "scopes": {
     "1001:2026-11-23": true,
     "1001:2026-11-24": true,
@@ -1958,6 +1958,10 @@
       "day": "2026-11-25",
       "status": "sent"
     },
+    "4aa968bf671ed8767b4fcefec8c776614b8c014559f5d0be6f35dd79ae3397f9": {
+      "day": "2026-11-28",
+      "status": "seen"
+    },
     "5474c37cf82c079831847aaa9c6d0ce3b71e583e86cb3a15ce2510c6c5eda67e": {
       "day": "2026-12-06",
       "status": "sent"
@@ -2026,11 +2030,17 @@
       "day": "2026-11-28",
       "status": "sent"
     },
+    "f7b1ed14662f255d70c919765a5fa6dc7d7d296d9d794686b874df10bea84fcb": {
+      "day": "2026-11-28",
+      "status": "seen"
+    },
     "fdb81aaf9d4fbcbddf25a4f4a62d7087284b0adff1c856f91e62b0e9848002d2": {
       "day": "2026-11-25",
       "status": "sent"
     }
   },
   "version": 1,
-  "watch": {}
+  "watch": {
+    "1016:2026-11-28": true
+  }
 }
